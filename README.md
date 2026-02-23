@@ -117,11 +117,3 @@ BaseStation/
 │   └── logger/      # Logging system
 └── platformio.ini   # PlatformIO configuration
 ```
-
-## License
-
-This project is open source.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
