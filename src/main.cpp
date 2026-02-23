@@ -91,8 +91,6 @@ void displayRTCM1005() {
 
 // Check for RTCM 1074 (GPS observations)
 void checkRTCM1074() {
-  // RTCM 1074 is processed via checkCallbacks() and processRTCM()
-  // Counters are maintained in processRTCM buffer handling
   rtcmStats.rtcm1074Count++;
 }
 

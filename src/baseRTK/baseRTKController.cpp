@@ -25,7 +25,7 @@ void checkRTKStatus() {
 
   logger.logInfo("RTK", "Fix: " + fixStr + " | Satellites: " + String(SIV));
   
-  // Also log data if we have a fix
+  // Log data (Fix)
   if (fixType >= 2) {
     float latitude = myGNSS.getLatitude() / 1e7;
     float longitude = myGNSS.getLongitude() / 1e7;
@@ -46,7 +46,7 @@ void initRTKController() {
 
   logger.logInfo("RTK", "GNSS initialized successfully");
 
-   // Clear previous values
+  // Clear previous values
   myGNSS.newCfgValset();
   myGNSS.addCfgValset(UBLOX_CFG_TMODE_MODE, 0);
   myGNSS.sendCfgValset();
@@ -101,7 +101,6 @@ bool setMode(BaseConfig config){
     logger.logInfo("RTK", msg);
   }
 
-  // sendCfgValset may be needed to apply changes; combine its result with prior outcome
   bool sendOk = myGNSS.sendCfgValset();
   if (!sendOk) {
     logger.logError("RTK", "sendCfgValset failed");

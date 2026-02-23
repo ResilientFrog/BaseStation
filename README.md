@@ -108,7 +108,7 @@ See [LOGGING_GUIDE.md](LOGGING_GUIDE.md) for detailed logging documentation.
 
 ```
 BaseStation/
-├── include/          # Header files
+├── include/         # Header files
 ├── lib/             # Libraries
 ├── src/
 │   ├── main.cpp     # Main application
