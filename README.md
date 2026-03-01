@@ -14,7 +14,7 @@ ESP32-based RTK (Real-Time Kinematic) GPS Base Station with web interface and lo
 ## Hardware
 
 - **MCU**: ESP32
-- **GNSS Module**: u-blox ZED-F9P (or compatible)
+- **GNSS Module**: u-blox ZED-F9P
 - **Display**: SSD1306 OLED (128x64, SPI)
 - **Connection**: I2C for GNSS, SPI for display
 
@@ -70,6 +70,7 @@ Connect to the base station WiFi AP and navigate to `http://192.168.4.1`
 #### Endpoints
 
 - `GET /` - Main configuration page with logs viewer
+- `GET /rtcm/stream` - Live RTCM binary stream over HTTP
 - `GET /logs` - All logs (JSON)
 - `GET /logs/steps` - Step logs only (JSON)
 - `GET /logs/data` - Sensor data logs (JSON)
@@ -78,7 +79,7 @@ Connect to the base station WiFi AP and navigate to `http://192.168.4.1`
 
 ### RTK Rover Connection
 
-Rovers can connect to port 2101 to receive RTCM correction data:
+Rovers can connect to port 2101 to receive RTCM correction data (recommended):
 
 ```cpp
 WiFiClient rtkClient;
@@ -89,6 +90,14 @@ while (rtkClient.available()) {
   roverGNSS.pushRawData(rtcmByte);
 }
 ```
+
+Or consume RTCM via HTTP stream endpoint on port 8080:
+
+```bash
+curl http://192.168.4.1:8080/rtcm/stream --output rtcm.bin
+```
+
+Note: `GET /rtcm/stream` on port 80 responds with a redirect to port 8080.
 
 ## RTCM Messages
 

@@ -8,7 +8,7 @@
 #include <LittleFS.h>
 
 #define LOG_FILE "/sensor_log.txt"
-const uint32_t BAUD_RATE = 9600;
+const uint32_t BAUD_RATE = 115200;
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -165,7 +165,7 @@ void displayMainScreen() {
 
 
 void setup() {
-  Serial.begin(BAUD_RATE);
+  Serial.begin(9600);
   delay(2000);
 
   logger.logInfo("System", "Initializing BaseStation");
@@ -222,7 +222,6 @@ void loop() {
 
   // This reads I2C and updates internal variables like getSurveyInValid()
   myGNSS.checkUblox(); 
-  Serial.println(myGNSS.checkUblox());
   myGNSS.checkCallbacks(); // Check for new RTCM bytes
 
   // 2. Handle WiFi/Web logic

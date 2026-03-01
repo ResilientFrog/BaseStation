@@ -2,13 +2,28 @@
 #include "baseRTKController.h"
 #include <Wire.h>
 #include "wi-fi/wiFiConnectionController.h"
-#include <LittleFS.h>
 #include "logger/Logger.h"
 
-uint8_t rtcmBuffer[256];
-uint16_t bufferIndex = 0;
 SFE_UBLOX_GNSS myGNSS;
-const char *LOG_FILE = "/sensor_log.txt";
+
+class RTCMForwarder : public Print {
+public:
+  size_t write(uint8_t incoming) override {
+    sendRTCMToClients(&incoming, 1);
+    return 1;
+  }
+
+  size_t write(const uint8_t *buffer, size_t size) override {
+    if (buffer == nullptr || size == 0) {
+      return 0;
+    }
+
+    sendRTCMToClients(const_cast<uint8_t *>(buffer), static_cast<uint16_t>(size));
+    return size;
+  }
+};
+
+RTCMForwarder rtcmForwarder;
 
 void checkRTKStatus() {
   byte fixType = myGNSS.getFixType(); 
@@ -35,7 +50,6 @@ void checkRTKStatus() {
 }
 
 void initRTKController() {
-  Serial.begin(9800);
   Wire.begin();
 
   if (myGNSS.begin() == false) {
@@ -45,6 +59,8 @@ void initRTKController() {
   }
 
   logger.logInfo("RTK", "GNSS initialized successfully");
+  myGNSS.setRTCMOutputPort(rtcmForwarder);
+  logger.logInfo("RTK", "RTCM output routed to rover stream clients");
 
   // Clear previous values
   myGNSS.newCfgValset();
@@ -123,30 +139,5 @@ void loopRTKController() {
 }
 
 void processRTCM(uint8_t incoming) {
-
-  //TODO maybe to transfer it to wi-fi part
-  if (incoming < 0x10) Serial.print("0");
-  Serial.print(incoming, HEX);
-  Serial.print(" ");
-  
-  rtcmBuffer[bufferIndex++] = incoming;
-  if (bufferIndex >= 128) {
-    //Wi-fi client to send RTCM
-    // Send to connected rover clients via WiFi
-    sendRTCMToClients(rtcmBuffer, 128);
-    
-    // Append chunk to log
-    File f = LittleFS.open(LOG_FILE, FILE_APPEND);
-    if (f) {
-      f.write(rtcmBuffer, 128);
-      f.close();
-      logger.logDebug("RTK", "RTCM chunk sent and logged");
-      Serial.println(F("RTCM chunk sent and logged"));
-    } else {
-      logger.logError("RTK", "Failed to open log file for RTCM");
-      Serial.println(F("Failed to open log file for RTCM"));
-    }
-
-    bufferIndex = 0;
-  }
+  sendRTCMToClients(&incoming, 1);
 }

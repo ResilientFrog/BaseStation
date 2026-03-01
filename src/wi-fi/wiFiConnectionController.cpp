@@ -157,6 +157,22 @@ const char index_html[] PROGMEM = R"rawliteral(
 WiFiServer rtkServer(2101);
 WebServer server(80);
 WiFiClient rtkClient;
+
+static size_t streamToClient(WiFiClient &client, uint8_t *data, uint16_t length, const char *name) {
+  if (!(client && client.connected())) {
+    return 0;
+  }
+
+  size_t written = client.write(data, length);
+  if (written != length) {
+    logger.logWarn("WiFi", String("RTCM write failed for ") + name + String(" (") + String(written) + String("/") + String(length) + String(")"));
+    Serial.printf("[RTCM] Write failed for %s (%u/%u). Closing client.\n", name, (unsigned int)written, (unsigned int)length);
+    client.stop();
+  }
+
+  return written;
+}
+
 void handleRoot() {
   Serial.println("Client requested root page");
   server.send(200, "text/html", index_html);
@@ -281,35 +297,59 @@ void initWiFiServer() {
   server.on("/logs/data", HTTP_GET, handleDataLogs);
   server.on("/logs/stats", HTTP_GET, handleStats);
   server.on("/logs/clear", HTTP_POST, handleClearLogs);
+
+  rtkServer.begin();
+  rtkServer.setNoDelay(true);
   
   server.begin();
   logger.logInfo("WiFi", "Web server started on port 80");
+  logger.logInfo("WiFi", "RTCM TCP server started on port 2101");
  
 }
 
 void handleRTKClients() {
   // Check if a new Rover wants to connect
   if (rtkServer.hasClient()) {
-    if (rtkClient.connected()) {
-      Serial.println(F("New connection rejected. Rover already connected."));
-      rtkServer.available().stop(); 
-    } else {
-      rtkClient = rtkServer.available();
-      Serial.println(F("Rover Connected for RTCM Stream!"));
+    WiFiClient incomingTcp = rtkServer.available();
+    if (rtkClient && rtkClient.connected()) {
+      Serial.println(F("[RTCM] Replacing existing TCP rover connection"));
+      rtkClient.stop();
     }
+    rtkClient = incomingTcp;
+    Serial.println(F("Rover Connected for RTCM Stream!"));
+    Serial.printf("[RTCM] TCP rover connected from %s:%u\n", rtkClient.remoteIP().toString().c_str(), rtkClient.remotePort());
   }
 
   // Check if Rover disconnected
   if (rtkClient && !rtkClient.connected()) {
     rtkClient.stop();
     Serial.println(F("Rover Disconnected."));
+    Serial.println(F("[RTCM] TCP rover stream closed"));
   }
 }
 
 // This is the function called by your baseRTKController
 void sendRTCMToClients(uint8_t *data, uint16_t length) {
-  // Only write if we have a connected client
+  static uint32_t tcpBytesWindow = 0;
+  static uint32_t packetsWindow = 0;
+  static unsigned long lastStatsPrintMs = 0;
+
+  size_t tcpWritten = streamToClient(rtkClient, data, length, "TCP rover");
+
+  tcpBytesWindow += (uint32_t)tcpWritten;
+  packetsWindow++;
+
+  unsigned long now = millis();
   if (rtkClient && rtkClient.connected()) {
-    rtkClient.write(data, length);
+    if (now - lastStatsPrintMs >= 2000) {
+      Serial.printf("[RTCM] 2s stats: TCP=%luB packets=%lu\n", tcpBytesWindow, packetsWindow);
+      tcpBytesWindow = 0;
+      packetsWindow = 0;
+      lastStatsPrintMs = now;
+    }
+  } else {
+    tcpBytesWindow = 0;
+    packetsWindow = 0;
+    lastStatsPrintMs = now;
   }
 }
