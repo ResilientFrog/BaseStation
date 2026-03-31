@@ -52,7 +52,7 @@ public:
   // Data logging
   void logData(const String& dataType, float latitude, float longitude, float altitude, 
                uint8_t fixType, uint8_t satellites);
-  void logRTCMMessage(uint8_t messageType, uint32_t count);
+  void logRTCMMessage(uint16_t messageType, uint32_t count);
   
   // Retrieval
   String getStepLogsAsJSON();

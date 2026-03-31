@@ -11,6 +11,7 @@ extern SFE_UBLOX_GNSS myGNSS;
 void checkRTKStatus();
 void initRTKController();
 bool setMode(BaseConfig config);
+BaseMode getCurrentBaseMode();
 void observationTime();
 void observationAccuracy();
 void loopRTKController();

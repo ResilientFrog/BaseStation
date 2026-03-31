@@ -1,5 +1,38 @@
 #include "Logger.h"
 
+namespace {
+String escapeJson(const String& input) {
+  String escaped;
+  escaped.reserve(input.length() + 8);
+
+  for (size_t index = 0; index < input.length(); ++index) {
+    char character = input[index];
+    switch (character) {
+      case '\\':
+        escaped += "\\\\";
+        break;
+      case '"':
+        escaped += "\\\"";
+        break;
+      case '\n':
+        escaped += "\\n";
+        break;
+      case '\r':
+        escaped += "\\r";
+        break;
+      case '\t':
+        escaped += "\\t";
+        break;
+      default:
+        escaped += character;
+        break;
+    }
+  }
+
+  return escaped;
+}
+}
+
 const char* Logger::STEP_LOG_FILE = "/logs/steps.txt";
 const char* Logger::DATA_LOG_FILE = "/logs/data.txt";
 
@@ -93,7 +126,7 @@ void Logger::logData(const String& dataType, float latitude, float longitude, fl
   }
 }
 
-void Logger::logRTCMMessage(uint8_t messageType, uint32_t count) {
+void Logger::logRTCMMessage(uint16_t messageType, uint32_t count) {
   String msg = "RTCM Type " + String(messageType) + " count: " + String(count);
   logInfo("RTK", msg);
 }
@@ -104,9 +137,9 @@ String Logger::getStepLogsAsJSON() {
     if (i > 0) json += ",";
     json += "{";
     json += "\"timestamp\":" + String(stepLogs[i].timestamp) + ",";
-    json += "\"level\":\"" + stepLogs[i].level + "\",";
-    json += "\"component\":\"" + stepLogs[i].component + "\",";
-    json += "\"message\":\"" + stepLogs[i].message + "\"";
+    json += "\"level\":\"" + escapeJson(stepLogs[i].level) + "\",";
+    json += "\"component\":\"" + escapeJson(stepLogs[i].component) + "\",";
+    json += "\"message\":\"" + escapeJson(stepLogs[i].message) + "\"";
     json += "}";
   }
   json += "]";
@@ -119,7 +152,7 @@ String Logger::getDataLogsAsJSON() {
     if (i > 0) json += ",";
     json += "{";
     json += "\"timestamp\":" + String(dataLogs[i].timestamp) + ",";
-    json += "\"dataType\":\"" + dataLogs[i].dataType + "\",";
+    json += "\"dataType\":\"" + escapeJson(dataLogs[i].dataType) + "\",";
     json += "\"latitude\":" + String(dataLogs[i].latitude, 7) + ",";
     json += "\"longitude\":" + String(dataLogs[i].longitude, 7) + ",";
     json += "\"altitude\":" + String(dataLogs[i].altitude, 2) + ",";

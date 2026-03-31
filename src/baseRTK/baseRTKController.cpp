@@ -24,6 +24,11 @@ public:
 };
 
 RTCMForwarder rtcmForwarder;
+static BaseMode currentBaseMode = MODE_INVALID;
+
+BaseMode getCurrentBaseMode() {
+  return currentBaseMode;
+}
 
 void checkRTKStatus() {
   byte fixType = myGNSS.getFixType(); 
@@ -62,11 +67,15 @@ void initRTKController() {
   myGNSS.setRTCMOutputPort(rtcmForwarder);
   logger.logInfo("RTK", "RTCM output routed to rover stream clients");
 
-  // Clear previous values
+  // Start in disabled timing mode so Survey-In only begins after an explicit web command.
   myGNSS.newCfgValset();
   myGNSS.addCfgValset(UBLOX_CFG_TMODE_MODE, 0);
-  myGNSS.sendCfgValset();
-  delay(500);
+  if (!myGNSS.sendCfgValset()) {
+    logger.logWarn("RTK", "Failed to clear timing mode at startup");
+  } else {
+    logger.logInfo("RTK", "Timing mode reset to DISABLED at startup");
+  }
+  currentBaseMode = MODE_INVALID;
 
   // Set I2C port to output UBX and RTCM3
   myGNSS.setI2COutput(COM_TYPE_UBX | COM_TYPE_RTCM3); // Ensure RTCM3 is enabled
@@ -86,25 +95,33 @@ void initRTKController() {
 }
 
 bool setMode(BaseConfig config){
-  myGNSS.newCfgValset();
+  if (config.mode == MODE_INVALID) {
+    logger.logWarn("RTK", "setMode called with MODE_INVALID");
+    return false;
+  }
+
   bool result = true;
 
   if (config.mode == MODE_SURVEY_IN) {
     if (myGNSS.getSurveyInActive() == true) {
       logger.logInfo("RTK", "Survey-In already active");
       Serial.println(F("Survey-In already active"));
+      currentBaseMode = MODE_SURVEY_IN;
       result = true;
     } else {
       result = myGNSS.enableSurveyMode(config.duration, config.accuracy, VAL_LAYER_RAM);
       if (result) {
         String msg = "Survey-In started - Duration: " + String(config.duration) + ", Accuracy: " + String(config.accuracy, 2);
         logger.logInfo("RTK", msg);
+        currentBaseMode = MODE_SURVEY_IN;
       } else {
         logger.logError("RTK", "Survey-In start failed");
       }
       Serial.println(result ? F("Survey-In started") : F("Survey-In start failed"));
     }
+    return result;
   } else if (config.mode == MODE_FIXED) {
+    myGNSS.newCfgValset();
     myGNSS.addCfgValset(UBLOX_CFG_TMODE_MODE, 2); // Fixed Position
     int32_t latFixed = (int32_t)(config.latitude * 10000000);
     int32_t lonFixed = (int32_t)(config.longitude * 10000000);
@@ -115,15 +132,21 @@ bool setMode(BaseConfig config){
     
     String msg = "Fixed position set - Lat: " + String(config.latitude, 7) + ", Lon: " + String(config.longitude, 7) + ", Alt: " + String(config.altitude, 2);
     logger.logInfo("RTK", msg);
+
+    bool sendOk = myGNSS.sendCfgValset();
+    if (!sendOk) {
+      logger.logError("RTK", "sendCfgValset failed");
+      Serial.println(F("sendCfgValset failed"));
+    }
+
+    if (sendOk) {
+      currentBaseMode = MODE_FIXED;
+    }
+
+    return sendOk;
   }
 
-  bool sendOk = myGNSS.sendCfgValset();
-  if (!sendOk) {
-    logger.logError("RTK", "sendCfgValset failed");
-    Serial.println(F("sendCfgValset failed"));
-  }
-
-  return (result && sendOk);
+  return false;
 }
 
 void observationTime(){

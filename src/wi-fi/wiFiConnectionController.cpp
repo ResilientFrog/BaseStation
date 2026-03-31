@@ -1,4 +1,5 @@
 #include <WebServer.h>
+#include <WiFi.h>
 #include <SparkFun_u-blox_GNSS_v3.h>
 #include "wiFiConnectionController.h"
 #include "baseRTK/baseRTKController.h"
@@ -10,11 +11,23 @@
 #endif
 
 #ifndef WIFI_AP_SSID
-#define WIFI_AP_SSID "CHANGE_ME_SSID"
+#define WIFI_AP_SSID "BASE_STATION_AP"
 #endif
 
 #ifndef WIFI_AP_PASSWORD
-#define WIFI_AP_PASSWORD "CHANGE_ME_PASSWORD"
+#define WIFI_AP_PASSWORD "BASE_STATION_PASSWORD"
+#endif
+
+#ifndef WIFI_AP_CHANNEL
+#define WIFI_AP_CHANNEL 6
+#endif
+
+#ifndef WIFI_AP_HIDDEN
+#define WIFI_AP_HIDDEN 0
+#endif
+
+#ifndef WIFI_AP_MAX_CONNECTIONS
+#define WIFI_AP_MAX_CONNECTIONS 4
 #endif
 
 const char *AP_SSID     = WIFI_AP_SSID;
@@ -234,59 +247,56 @@ void handleClient() {
   server.handleClient();
 }
 void handleLogs() {
-  if (logger.isInitialized()) {
-    server.send(200, "application/json", logger.getFullLogsAsJSON());
-  } else {
-    server.send(503, "application/json", "{\"error\":\"Logger not initialized\"}");
-  }
+  server.send(200, "application/json", logger.getFullLogsAsJSON());
 }
 
 void handleStepLogs() {
-  if (logger.isInitialized()) {
-    server.send(200, "application/json", logger.getStepLogsAsJSON());
-  } else {
-    server.send(503, "application/json", "{\"error\":\"Logger not initialized\"}");
-  }
+  server.send(200, "application/json", logger.getStepLogsAsJSON());
 }
 
 void handleDataLogs() {
-  if (logger.isInitialized()) {
-    server.send(200, "application/json", logger.getDataLogsAsJSON());
-  } else {
-    server.send(503, "application/json", "{\"error\":\"Logger not initialized\"}");
-  }
+  server.send(200, "application/json", logger.getDataLogsAsJSON());
 }
 
 void handleStats() {
-  if (logger.isInitialized()) {
-    String stats = "{";
-    stats += "\"logs\":" + logger.getStatistics() + ",";
-    stats += "\"wifi\":{\"ip\":\"" + WiFi.softAPIP().toString() + "\",\"clients\":" + String(WiFi.softAPgetStationNum()) + "}";
-    stats += "}";
-    server.send(200, "application/json", stats);
-  } else {
-    server.send(503, "application/json", "{\"error\":\"Logger not initialized\"}");
-  }
+  String stats = "{";
+  stats += "\"logs\":" + logger.getStatistics() + ",";
+  stats += "\"storageReady\":" + String(logger.isInitialized() ? "true" : "false") + ",";
+  stats += "\"wifi\":{\"ip\":\"" + WiFi.softAPIP().toString() + "\",\"clients\":" + String(WiFi.softAPgetStationNum()) + "}";
+  stats += "}";
+  server.send(200, "application/json", stats);
 }
 
 void handleClearLogs() {
   if (server.method() == HTTP_POST) {
-    if (logger.isInitialized()) {
-      logger.clearLogs();
-      logger.logInfo("WiFi", "Logs cleared by user");
-      server.send(200, "application/json", "{\"status\":\"cleared\"}");
-    } else {
-      server.send(503, "application/json", "{\"error\":\"Logger not initialized\"}");
-    }
+    logger.clearLogs();
+    logger.logInfo("WiFi", "Logs cleared by user");
+    server.send(200, "application/json", "{\"status\":\"cleared\"}");
   } else {
     server.send(405, "text/plain", "Method not allowed");
   }
 }
 
 void initWiFiServer() {
+  // Setup WiFi radio for stronger and more stable AP signal
+  WiFi.mode(WIFI_AP);
+  WiFi.setSleep(false);
+  bool txPowerSet = WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
   // Setup WiFi Access Point
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
+  bool apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, WIFI_AP_CHANNEL, WIFI_AP_HIDDEN, WIFI_AP_MAX_CONNECTIONS);
   delay(100);
+
+  if (!txPowerSet) {
+    logger.logWarn("WiFi", "Failed to set TX power to max");
+  }
+
+  if (!apStarted) {
+    logger.logError("WiFi", "Failed to start WiFi AP");
+  } else {
+    logger.logInfo("WiFi", "AP channel: " + String(WIFI_AP_CHANNEL) + ", max clients: " + String(WIFI_AP_MAX_CONNECTIONS));
+    logger.logInfo("WiFi", String("AP IP: ") + WiFi.softAPIP().toString());
+  }
   
   logger.logInfo("WiFi", "WiFi AP initialized");
   

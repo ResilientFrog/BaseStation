@@ -46,6 +46,10 @@ struct RTCMStats {
   uint32_t rtcm1094Count = 0;
   uint32_t rtcm1124Count = 0;
   uint32_t lastUpdate = 0;
+  double last1005X = 0.0;
+  double last1005Y = 0.0;
+  double last1005Z = 0.0;
+  bool has1005Coordinate = false;
 };
 
 RTCMStats rtcmStats;
@@ -78,6 +82,11 @@ void displayRTCM1005() {
     double z = data.AntennaReferencePointECEFZ;
     z /= 10000.0;
 
+    rtcmStats.last1005X = x;
+    rtcmStats.last1005Y = y;
+    rtcmStats.last1005Z = z;
+    rtcmStats.has1005Coordinate = true;
+
     Serial.print(F("RTCM 1005: X="));
     Serial.print(x, 2);
     Serial.print(F(" Y="));
@@ -85,7 +94,7 @@ void displayRTCM1005() {
     Serial.print(F(" Z="));
     Serial.println(z, 2);
     
-    logger.logRTCMMessage(1005, rtcmStats.rtcm1005Count);
+    logger.logRTCMMessage(static_cast<uint16_t>(1005), rtcmStats.rtcm1005Count);
   }
 }
 
@@ -116,22 +125,22 @@ void displayRTCMScreen() {
   display.setTextColor(SSD1306_WHITE);
   
   display.setCursor(0, 0);
-  display.println("RTCM Messages:");
+  display.println("RTCM Status:");
   
   display.setCursor(0, 10);
   display.printf("1005: %lu", rtcmStats.rtcm1005Count);
   
   display.setCursor(0, 20);
-  display.printf("1074: %lu", rtcmStats.rtcm1074Count);
+  display.printf("1074: %s", (rtcmStats.rtcm1074Count > 0) ? "OK" : "NOT SENDING");
   
   display.setCursor(0, 30);
-  display.printf("1084: %lu", rtcmStats.rtcm1084Count);
+  display.printf("1084: %s", (rtcmStats.rtcm1084Count > 0) ? "OK" : "NOT SENDING");
   
   display.setCursor(0, 40);
-  display.printf("1094: %lu", rtcmStats.rtcm1094Count);
+  display.printf("1094: %s", (rtcmStats.rtcm1094Count > 0) ? "OK" : "NOT SENDING");
   
   display.setCursor(0, 50);
-  display.printf("1124: %lu", rtcmStats.rtcm1124Count);
+  display.printf("1124: %s", (rtcmStats.rtcm1124Count > 0) ? "OK" : "NOT SENDING");
   
   display.display();
 }
@@ -150,11 +159,24 @@ void displayMainScreen() {
   display.printf("Fix: %d  Sats: %d", myGNSS.getFixType(), myGNSS.getSIV());
 
   display.setCursor(0, 30);
-  if (myGNSS.getSurveyInValid()) {
+  bool surveyValid = myGNSS.getSurveyInValid();
+  bool surveyActive = myGNSS.getSurveyInActive();
+  bool surveyRequested = (getCurrentBaseMode() == MODE_SURVEY_IN);
+
+  if (surveyValid) {
     display.print("Survey: DONE");
-    display.setCursor(0, 45);
-    display.print("RTCM 1005 OK");
-  } else if (myGNSS.getSurveyInActive()) {
+    if (rtcmStats.has1005Coordinate) {
+      display.setCursor(0, 39);
+      display.printf("1005 X: %.1f", rtcmStats.last1005X);
+      display.setCursor(0, 47);
+      display.printf("Y: %.1f", rtcmStats.last1005Y);
+      display.setCursor(0, 55);
+      display.printf("Z: %.1f", rtcmStats.last1005Z);
+    } else {
+      display.setCursor(0, 45);
+      display.print("1005: Waiting...");
+    }
+  } else if (surveyActive || surveyRequested) {
     display.printf("Survey: ACTIVE (%ds)", myGNSS.getSurveyInObservationTime());
   } else {
     display.print("Survey: INACTIVE");
@@ -193,7 +215,7 @@ void setup() {
 
   delay(1500);
   // Initialize LittleFS for logging
-  if (!LittleFS.begin()) {
+  if (!LittleFS.begin(true)) {
     Serial.println(F("LittleFS mount failed"));
     logger.logError("System", "LittleFS mount failed");
   } else {
@@ -208,14 +230,20 @@ void setup() {
   
   logger.logInfo("System", "Retrieving base configuration");
   BaseConfig values = getBaseConfiguration();
-  Serial.println("Initial Config:");
-  Serial.println("Mode: " + String(values.mode == MODE_SURVEY_IN ? "Survey-In" : "Fixed"));
-  Serial.println("Accuracy: " + String(values.accuracy));
-  
-  bool applied = setMode(values);
-  String initMsg = applied ? "Initial settings applied successfully" : "Failed to apply initial settings";
-  logger.logInfo("System", initMsg);
-  Serial.println(applied ? "Initial settings applied" : "Failed to apply initial settings");
+
+  if (values.mode != MODE_INVALID) {
+    Serial.println("Initial Config:");
+    Serial.println("Mode: " + String(values.mode == MODE_SURVEY_IN ? "Survey-In" : "Fixed"));
+    Serial.println("Accuracy: " + String(values.accuracy));
+
+    bool applied = setMode(values);
+    String initMsg = applied ? "Initial settings applied successfully" : "Failed to apply initial settings";
+    logger.logInfo("System", initMsg);
+    Serial.println(applied ? "Initial settings applied" : "Failed to apply initial settings");
+  } else {
+    logger.logInfo("System", "No startup base mode provided; waiting for web configuration");
+    Serial.println("No startup base mode provided; waiting for web configuration");
+  }
 }
 
 void loop() {

@@ -50,7 +50,14 @@ Create `include/secrets.h`:
 ```cpp
 #define WIFI_AP_SSID "YourBaseStationName"
 #define WIFI_AP_PASSWORD "YourPassword"
+
+// Optional AP tuning (helps with signal quality and congestion)
+#define WIFI_AP_CHANNEL 6
+#define WIFI_AP_HIDDEN 0
+#define WIFI_AP_MAX_CONNECTIONS 4
 ```
+
+Signal tip: if range is weak or unstable, try channel `1`, `6`, or `11` and keep the base station away from metal enclosures and USB 3.0 noise sources.
 
 ## Usage
 
