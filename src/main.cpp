@@ -8,11 +8,8 @@
 #include <LittleFS.h>
 
 #define LOG_FILE "/sensor_log.txt"
-const uint32_t BAUD_RATE = 115200;
-
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-
 #define OLED_MOSI 23
 #define OLED_CLK  18
 #define OLED_DC   16
@@ -28,95 +25,82 @@ Adafruit_SSD1306 display(
   OLED_CS
 );
 
-// Screen modes for rotating display
+
 enum ScreenMode {
   SCREEN_MAIN = 0,
   SCREEN_RTCM = 1
 };
 
-ScreenMode currentScreen = SCREEN_MAIN;
-unsigned long lastScreenSwitch = 0;
-const unsigned long SCREEN_SWITCH_INTERVAL = 5000; // Switch screens every 5 seconds
 
-// RTCM message counters
 struct RTCMStats {
   uint32_t rtcm1005Count = 0;
-  uint32_t rtcm1074Count = 0;
-  uint32_t rtcm1084Count = 0;
-  uint32_t rtcm1094Count = 0;
-  uint32_t rtcm1124Count = 0;
   uint32_t lastUpdate = 0;
   double last1005X = 0.0;
   double last1005Y = 0.0;
   double last1005Z = 0.0;
+  double last1005LON = 0.0;
+  double last1005LAT = 0.0;
+  double last1005ALT = 0.0;
   bool has1005Coordinate = false;
 };
 
-RTCMStats rtcmStats;
+struct GNSSDisplayCache {
+  float accuracyMeters = 0.0f;
+  uint8_t fix = 0;
+  uint8_t sats = 0;
+  bool surveyValid = false;
+  bool surveyActive = false;
+  unsigned long surveyObservationTime = 0;
+  bool initialized = false;
+};
 
+RTCMStats rtcmStats;
+GNSSDisplayCache gnssDisplayCache;
+ScreenMode currentScreen = SCREEN_MAIN;
+unsigned long lastScreenSwitch = 0;
+const uint16_t SCREEN_SWITCH_INTERVAL = 2000;
+const uint16_t DISPLAY_UPDATE_INTERVAL = 1000;
+const uint32_t SURVEY_STATUS_LOG_INTERVAL = 30000;
+const uint16_t GNSS_POLL_INTERVAL = 100;
+const uint16_t DISPLAY_CACHE_REFRESH_INTERVAL = 500;
+const uint32_t SPI_FREQUENCY = 1000000;
+const uint16_t DELAY_TIME = 2000;
+const uint32_t BAUD_RATE = 115200;
 
 void logToFile(String message) {
   File file = LittleFS.open(LOG_FILE, FILE_APPEND);
   if (!file) {
-    Serial.println("Failed to open file");
     return;
   }
-
   file.println(String(millis()) + " - " + message);
   file.close();
 }
 
-// Display RTCM 1005 message on screen
+// Function for Display RTCM 1005 message
 void displayRTCM1005() {
-  RTCM_1005_data_t data;
-  uint8_t result = myGNSS.getLatestRTCM1005(&data);
   
-  if (result == 2) { // Fresh data available
+  RTCM_1005_data_t data;
+  uint8_t result = getRTCM1005(&data);
+  
+  if (result == 2) { 
     rtcmStats.rtcm1005Count++;
     rtcmStats.lastUpdate = millis();
     
-    double x = data.AntennaReferencePointECEFX;
-    x /= 10000.0; // Convert to m
-    double y = data.AntennaReferencePointECEFY;
-    y /= 10000.0;
-    double z = data.AntennaReferencePointECEFZ;
-    z /= 10000.0;
+    double x = data.AntennaReferencePointECEFX / 10000.0;
+    double y = data.AntennaReferencePointECEFY / 10000.0;
+    double z = data.AntennaReferencePointECEFZ / 10000.0;
 
     rtcmStats.last1005X = x;
     rtcmStats.last1005Y = y;
     rtcmStats.last1005Z = z;
+    rtcmStats.last1005LON = longitudeData() / 1e7;
+    rtcmStats.last1005LAT = latitudeData() / 1e7;
+    rtcmStats.last1005ALT = altitudeData() / 1000.0;
     rtcmStats.has1005Coordinate = true;
 
-    Serial.print(F("RTCM 1005: X="));
-    Serial.print(x, 2);
-    Serial.print(F(" Y="));
-    Serial.print(y, 2);
-    Serial.print(F(" Z="));
-    Serial.println(z, 2);
-    
-    logger.logRTCMMessage(static_cast<uint16_t>(1005), rtcmStats.rtcm1005Count);
   }
 }
 
-// Check for RTCM 1074 (GPS observations)
-void checkRTCM1074() {
-  rtcmStats.rtcm1074Count++;
-}
-
-// Check for RTCM 1084 (GLONASS observations)
-void checkRTCM1084() {
-  rtcmStats.rtcm1084Count++;
-}
-
-// Check for RTCM 1094 (Galileo observations)
-void checkRTCM1094() {
-  rtcmStats.rtcm1094Count++;
-}
-
-// Check for RTCM 1124 (BeiDou observations)
-void checkRTCM1124() {
-  rtcmStats.rtcm1124Count++;
-}
 
 // Display all available RTCM messages on screen
 void displayRTCMScreen() {
@@ -126,21 +110,16 @@ void displayRTCMScreen() {
   
   display.setCursor(0, 0);
   display.println("RTCM Status:");
-  
-  display.setCursor(0, 10);
-  display.printf("1005: %lu", rtcmStats.rtcm1005Count);
-  
-  display.setCursor(0, 20);
-  display.printf("1074: %s", (rtcmStats.rtcm1074Count > 0) ? "OK" : "NOT SENDING");
-  
-  display.setCursor(0, 30);
-  display.printf("1084: %s", (rtcmStats.rtcm1084Count > 0) ? "OK" : "NOT SENDING");
-  
-  display.setCursor(0, 40);
-  display.printf("1094: %s", (rtcmStats.rtcm1094Count > 0) ? "OK" : "NOT SENDING");
-  
-  display.setCursor(0, 50);
-  display.printf("1124: %s", (rtcmStats.rtcm1124Count > 0) ? "OK" : "NOT SENDING");
+  display.setCursor(0, 12);
+  if (rtcmStats.has1005Coordinate) {
+    display.printf("Lon: %.8f", rtcmStats.last1005LON);
+    display.setCursor(0, 24);
+    display.printf("Lat: %.8f", rtcmStats.last1005LAT);
+    display.setCursor(0, 36);
+    display.printf("Alt: %.2f", rtcmStats.last1005ALT);
+  } else {
+    display.println("Waiting for RTCM 1005");
+  }
   
   display.display();
 }
@@ -151,33 +130,29 @@ void displayMainScreen() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
-  float accMeters = myGNSS.getSurveyInMeanAccuracy();
+  float accMeters = gnssDisplayCache.accuracyMeters;
   display.setCursor(0, 0);
   display.printf("Acc: %.2f m", accMeters);
-
   display.setCursor(0, 15);
-  display.printf("Fix: %d  Sats: %d", myGNSS.getFixType(), myGNSS.getSIV());
-
+  display.printf("Fix: %d  Sats: %d", gnssDisplayCache.fix, gnssDisplayCache.sats);
   display.setCursor(0, 30);
-  bool surveyValid = myGNSS.getSurveyInValid();
-  bool surveyActive = myGNSS.getSurveyInActive();
+  bool surveyValid = gnssDisplayCache.surveyValid;
+  bool surveyActive = gnssDisplayCache.surveyActive;
   bool surveyRequested = (getCurrentBaseMode() == MODE_SURVEY_IN);
+  
 
   if (surveyValid) {
     display.print("Survey: DONE");
     if (rtcmStats.has1005Coordinate) {
       display.setCursor(0, 39);
-      display.printf("1005 X: %.1f", rtcmStats.last1005X);
+      display.printf("X: %.4f", rtcmStats.last1005X);
       display.setCursor(0, 47);
-      display.printf("Y: %.1f", rtcmStats.last1005Y);
+      display.printf("Y: %.4f", rtcmStats.last1005Y);
       display.setCursor(0, 55);
-      display.printf("Z: %.1f", rtcmStats.last1005Z);
-    } else {
-      display.setCursor(0, 45);
-      display.print("1005: Waiting...");
-    }
+      display.printf("Z: %.4f", rtcmStats.last1005Z);
+    } 
   } else if (surveyActive || surveyRequested) {
-    display.printf("Survey: ACTIVE (%ds)", myGNSS.getSurveyInObservationTime());
+    display.printf("Survey: ACTIVE (%lus)", gnssDisplayCache.surveyObservationTime);
   } else {
     display.print("Survey: INACTIVE");
   }
@@ -185,23 +160,28 @@ void displayMainScreen() {
   display.display();
 }
 
+void refreshGNSSDisplayCache() {
+  gnssDisplayCache.accuracyMeters = observationAccuracy();
+  gnssDisplayCache.fix = fixType();
+  gnssDisplayCache.sats = satellites();
+  gnssDisplayCache.surveyValid = surveyValidity();
+  gnssDisplayCache.surveyActive = surveyActivity();
+  gnssDisplayCache.surveyObservationTime = observationTime();
+  gnssDisplayCache.initialized = true;
+}
+
 
 void setup() {
-  Serial.begin(9600);
-  delay(2000);
 
-  logger.logInfo("System", "Initializing BaseStation");
+  delay(DELAY_TIME);
 
-  Serial.println("===== CHIP INFO =====");
-  Serial.println(ESP.getChipModel());
-  logger.logInfo("System", "Chip: " + String(ESP.getChipModel()));
-
+  Serial.begin(BAUD_RATE);
+  delay(50);
   
   SPI.begin(OLED_CLK, -1, OLED_MOSI, OLED_CS);
-  SPI.setFrequency(1000000); // safer 1 MHz
+  SPI.setFrequency(SPI_FREQUENCY);
 
   if (!display.begin(SSD1306_SWITCHCAPVCC)) {
-    Serial.println("SSD1306 init failed");
     logger.logError("Display", "SSD1306 initialization failed");
     while (true);
   }
@@ -210,83 +190,79 @@ void setup() {
   display.setTextSize(0.5);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println("OLED OK");
+  display.println("START BASE STATION");
   display.display();
 
   delay(1500);
-  // Initialize LittleFS for logging
+ 
   if (!LittleFS.begin(true)) {
-    Serial.println(F("LittleFS mount failed"));
     logger.logError("System", "LittleFS mount failed");
-  } else {
-    Serial.println(F("LittleFS mounted"));
-    logger.initialize();  // Initialize logger after filesystem is ready
-    logger.logInfo("System", "LittleFS mounted successfully");
-    logToFile("System startup");
   }
 
   initWiFiServer();
   initRTKController();
-  
-  logger.logInfo("System", "Retrieving base configuration");
+  lastScreenSwitch = millis();
   BaseConfig values = getBaseConfiguration();
 
   if (values.mode != MODE_INVALID) {
-    Serial.println("Initial Config:");
-    Serial.println("Mode: " + String(values.mode == MODE_SURVEY_IN ? "Survey-In" : "Fixed"));
-    Serial.println("Accuracy: " + String(values.accuracy));
-
     bool applied = setMode(values);
     String initMsg = applied ? "Initial settings applied successfully" : "Failed to apply initial settings";
     logger.logInfo("System", initMsg);
-    Serial.println(applied ? "Initial settings applied" : "Failed to apply initial settings");
-  } else {
-    logger.logInfo("System", "No startup base mode provided; waiting for web configuration");
-    Serial.println("No startup base mode provided; waiting for web configuration");
-  }
+   
+  } 
 }
 
+// Function for main logic - display status on OLED, handle web server and RTK clients, check for RTCM messages, etc.
 void loop() {
+  static unsigned long lastDisplayUpdate = 0;
+  static unsigned long lastStatusLog = 0;
+  static unsigned long lastScreenLogTime = 0;
+  static unsigned long lastGnssPoll = 0;
+  static unsigned long lastDisplayCacheRefresh = 0;
+  unsigned long now = millis();
 
-  // This reads I2C and updates internal variables like getSurveyInValid()
-  myGNSS.checkUblox(); 
-  myGNSS.checkCallbacks(); // Check for new RTCM bytes
+  if (now - lastGnssPoll >= GNSS_POLL_INTERVAL) {
+    lastGnssPoll = now;
+    loopRTKController();
+    processCallbacks();
+    displayRTCM1005();
+  }
 
-  // 2. Handle WiFi/Web logic
+  if (now - lastDisplayCacheRefresh >= DISPLAY_CACHE_REFRESH_INTERVAL || !gnssDisplayCache.initialized) {
+    lastDisplayCacheRefresh = now;
+    refreshGNSSDisplayCache();
+  }
+
   server.handleClient();
   handleRTKClients();
 
-  // 3. Check for RTCM messages
-  displayRTCM1005();
-  checkRTCM1074();
-  checkRTCM1084();
-  checkRTCM1094();
-  checkRTCM1124();
+  ScreenMode desiredScreen = ((now / SCREEN_SWITCH_INTERVAL) % 2 == 0) ? SCREEN_MAIN : SCREEN_RTCM;
+  bool screenChanged = (desiredScreen != currentScreen);
+  currentScreen = desiredScreen;
 
-  // 4. Update Display (rotate between main and RTCM screens)
-  static unsigned long lastDisplayUpdate = 0;
-  if (millis() - lastDisplayUpdate > 1000) { // Update screen every 1 second
-    lastDisplayUpdate = millis();
+  if (screenChanged) {
+    unsigned long delta = (lastScreenLogTime == 0) ? 0 : (now - lastScreenLogTime);
+    lastScreenLogTime = now;
+    Serial.printf("[SCREEN] t=%lu ms, screen=%s, delta=%lu ms\n",
+                  now,
+                  (currentScreen == SCREEN_MAIN) ? "MAIN" : "RTCM",
+                  delta);
+  }
 
-    // Switch screen every 5 seconds
-    if (millis() - lastScreenSwitch > SCREEN_SWITCH_INTERVAL) {
-      lastScreenSwitch = millis();
-      currentScreen = (ScreenMode)((int)currentScreen + 1);
-      if (currentScreen > SCREEN_RTCM) {
-        currentScreen = SCREEN_MAIN;
-      }
-    }
+  if (hasAppliedBaseConfiguration() &&
+      getCurrentBaseMode() == MODE_SURVEY_IN &&
+      now - lastStatusLog >= SURVEY_STATUS_LOG_INTERVAL) {
+    lastStatusLog = now;
+    checkRTKStatus();
+  }
 
-    // Display appropriate screen
+  if (screenChanged || now - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL) {
+    lastDisplayUpdate = now;
+
     if (currentScreen == SCREEN_MAIN) {
       displayMainScreen();
     } else {
       displayRTCMScreen();
-    }
-
-    // -- DEBUG PRINT --
-    if (myGNSS.isConnected() == false) {
-       Serial.println(F("GNSS Connection Lost!"));
     }
   }
 }

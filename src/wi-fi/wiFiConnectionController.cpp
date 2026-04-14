@@ -103,9 +103,8 @@ const char index_html[] PROGMEM = R"rawliteral(
   <div class='container'>
     <h2>System Logs</h2>
     <div class='tab-buttons'>
-      <button class='tab-button active' onclick='loadLogs("all")'>All Logs</button>
+      <button class='tab-button active' onclick='loadLogs("data")'>Data</button>
       <button class='tab-button' onclick='loadLogs("steps")'>Steps</button>
-      <button class='tab-button' onclick='loadLogs("data")'>Data</button>
       <button class='tab-button' onclick='loadLogs("stats")'>Stats</button>
     </div>
     <div class='log-container' id='logContainer'>
@@ -153,15 +152,15 @@ const char index_html[] PROGMEM = R"rawliteral(
     function clearLogs() {
       if (confirm('Are you sure you want to clear all logs?')) {
         fetch('/logs/clear', { method: 'POST' })
-          .then(() => loadLogs('all'))
+          .then(() => loadLogs('data'))
           .catch(err => alert('Error clearing logs: ' + err));
       }
     }
 
     // Load logs on page load
-    loadLogs('all');
+    loadLogs('data');
     // Refresh logs every 5 seconds
-    setInterval(() => loadLogs('all'), 5000);
+    setInterval(() => loadLogs('data'), 5000);
   </script>
 </body>
 </html>
@@ -192,7 +191,7 @@ void handleRoot() {
 }
 
 BaseConfig getBaseConfiguration() {
-  BaseConfig config;
+  BaseConfig config = {};
   config.mode = MODE_INVALID;
 
   if (!server.hasArg("mode")) {
@@ -222,7 +221,6 @@ void handleUpdate() {
     return;
   }
 
-  Serial.println(F("Applying configuration from web UI"));
   if (config.mode == MODE_SURVEY_IN) {
     Serial.printf("Survey-In request: duration=%u acc=%.2f\n", config.duration, config.accuracy);
   } else if (config.mode == MODE_FIXED) {

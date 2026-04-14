@@ -25,15 +25,27 @@ public:
 
 RTCMForwarder rtcmForwarder;
 static BaseMode currentBaseMode = MODE_INVALID;
+static bool baseConfigurationApplied = false;
 
 BaseMode getCurrentBaseMode() {
   return currentBaseMode;
 }
 
+bool hasAppliedBaseConfiguration() {
+  return baseConfigurationApplied;
+}
+
 void checkRTKStatus() {
+  if (!baseConfigurationApplied || currentBaseMode != MODE_SURVEY_IN) {
+    return;
+  }
+
   byte fixType = myGNSS.getFixType(); 
   byte SIV = myGNSS.getSIV();
-  
+  int32_t latitudeRaw = myGNSS.getLatitude();
+  int32_t longitudeRaw = myGNSS.getLongitude();
+  int32_t altitudeRaw = myGNSS.getAltitude();
+
   String fixStr;
   if (fixType == 0) fixStr = "No Fix";
   else if (fixType == 1) fixStr = "Dead Reckoning";
@@ -47,9 +59,9 @@ void checkRTKStatus() {
   
   // Log data (Fix)
   if (fixType >= 2) {
-    float latitude = myGNSS.getLatitude() / 1e7;
-    float longitude = myGNSS.getLongitude() / 1e7;
-    float altitude = myGNSS.getAltitude() / 1000.0;
+    float latitude = latitudeRaw / 1e7;
+    float longitude = longitudeRaw / 1e7;
+    float altitude = altitudeRaw / 1000.0;
     logger.logData("RTK_STATUS", latitude, longitude, altitude, fixType, SIV);
   }
 }
@@ -59,7 +71,6 @@ void initRTKController() {
 
   if (myGNSS.begin() == false) {
     logger.logError("RTK", "GNSS not detected. Check I2C wiring.");
-    Serial.println(F("GNSS not detected. Check I2C wiring."));
     while (1);
   }
 
@@ -76,6 +87,7 @@ void initRTKController() {
     logger.logInfo("RTK", "Timing mode reset to DISABLED at startup");
   }
   currentBaseMode = MODE_INVALID;
+  baseConfigurationApplied = false;
 
   // Set I2C port to output UBX and RTCM3
   myGNSS.setI2COutput(COM_TYPE_UBX | COM_TYPE_RTCM3); // Ensure RTCM3 is enabled
@@ -105,16 +117,19 @@ bool setMode(BaseConfig config){
   if (config.mode == MODE_SURVEY_IN) {
     if (myGNSS.getSurveyInActive() == true) {
       logger.logInfo("RTK", "Survey-In already active");
-      Serial.println(F("Survey-In already active"));
       currentBaseMode = MODE_SURVEY_IN;
+      baseConfigurationApplied = true;
       result = true;
     } else {
       result = myGNSS.enableSurveyMode(config.duration, config.accuracy, VAL_LAYER_RAM);
       if (result) {
         String msg = "Survey-In started - Duration: " + String(config.duration) + ", Accuracy: " + String(config.accuracy, 2);
         logger.logInfo("RTK", msg);
+
         currentBaseMode = MODE_SURVEY_IN;
+        baseConfigurationApplied = true;
       } else {
+        baseConfigurationApplied = false;
         logger.logError("RTK", "Survey-In start failed");
       }
       Serial.println(result ? F("Survey-In started") : F("Survey-In start failed"));
@@ -122,25 +137,25 @@ bool setMode(BaseConfig config){
     return result;
   } else if (config.mode == MODE_FIXED) {
     myGNSS.newCfgValset();
-    myGNSS.addCfgValset(UBLOX_CFG_TMODE_MODE, 2); // Fixed Position
+    myGNSS.addCfgValset(UBLOX_CFG_TMODE_MODE, 2);
     int32_t latFixed = (int32_t)(config.latitude * 10000000);
     int32_t lonFixed = (int32_t)(config.longitude * 10000000);
-    int32_t altFixed = (int32_t)(config.altitude * 1000); // meters to mm
+    int32_t altFixed = (int32_t)(config.altitude * 1000);
     myGNSS.addCfgValset(UBLOX_CFG_TMODE_LAT, latFixed);
     myGNSS.addCfgValset(UBLOX_CFG_TMODE_LON, lonFixed);
     myGNSS.addCfgValset(UBLOX_CFG_TMODE_HEIGHT, altFixed);
     
-    String msg = "Fixed position set - Lat: " + String(config.latitude, 7) + ", Lon: " + String(config.longitude, 7) + ", Alt: " + String(config.altitude, 2);
+    String msg = "Fixed position set - Lat: " + String(config.latitude, 8) + ", Lon: " + String(config.longitude, 8) + ", Alt: " + String(config.altitude, 2);
     logger.logInfo("RTK", msg);
 
     bool sendOk = myGNSS.sendCfgValset();
-    if (!sendOk) {
-      logger.logError("RTK", "sendCfgValset failed");
-      Serial.println(F("sendCfgValset failed"));
-    }
-
     if (sendOk) {
+      logger.logData("MODE_FIXED_TRIGGER", (float)config.latitude, (float)config.longitude,
+                     (float)config.altitude, myGNSS.getFixType(), myGNSS.getSIV());
       currentBaseMode = MODE_FIXED;
+      baseConfigurationApplied = true;
+    } else {
+      baseConfigurationApplied = false;
     }
 
     return sendOk;
@@ -149,18 +164,51 @@ bool setMode(BaseConfig config){
   return false;
 }
 
-void observationTime(){
-  myGNSS.getSurveyInObservationTime();
+unsigned long observationTime(){
+  return myGNSS.getSurveyInObservationTime();
 }
 
-void observationAccuracy(){
-  myGNSS.getSurveyInMeanAccuracy();
+float observationAccuracy(){
+  return myGNSS.getSurveyInMeanAccuracy();
 }
 
-void loopRTKController() {
-  myGNSS.checkUblox();
+bool loopRTKController() {
+ return myGNSS.checkUblox();
+ 
 }
 
-void processRTCM(uint8_t incoming) {
-  sendRTCMToClients(&incoming, 1);
+unsigned long longitudeData() {
+ return myGNSS.getLongitude();
+ 
+}
+unsigned long  latitudeData() {
+ return  myGNSS.getLatitude();
+ 
+}
+unsigned long altitudeData() {
+ return myGNSS.getAltitude();
+ 
+}
+u_int8_t fixType() {
+ return myGNSS.getFixType();
+ 
+}
+u_int8_t satellites() {
+ return myGNSS.getSIV();
+ 
+}
+bool surveyValidity() {
+ return myGNSS.getSurveyInValid();
+ 
+}
+bool surveyActivity() {
+ return myGNSS.getSurveyInActive();
+ 
+}
+void processCallbacks() {
+  myGNSS.checkCallbacks();
+}
+u_int8_t getRTCM1005(RTCM_1005_data_t* data) {
+ 
+  return myGNSS.getLatestRTCM1005(data);
 }

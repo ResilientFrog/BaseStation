@@ -8,12 +8,22 @@
 extern SFE_UBLOX_GNSS myGNSS;
 
 // Functions main.cpp can call
-void checkRTKStatus();
-void initRTKController();
-bool setMode(BaseConfig config);
-BaseMode getCurrentBaseMode();
-void observationTime();
-void observationAccuracy();
-void loopRTKController();
+extern void checkRTKStatus();
+extern void initRTKController();
+extern bool setMode(BaseConfig config);
+extern BaseMode getCurrentBaseMode();
+extern bool hasAppliedBaseConfiguration();
+extern unsigned long observationTime();
+extern float observationAccuracy();
+extern bool loopRTKController();
+extern unsigned long longitudeData();
+extern unsigned long latitudeData();
+extern unsigned long altitudeData();
+extern u_int8_t fixType();
+extern u_int8_t satellites();
+extern bool surveyValidity();
+extern bool surveyActivity();
+extern void processCallbacks();
+extern u_int8_t getRTCM1005(RTCM_1005_data_t* data);
 
 #endif

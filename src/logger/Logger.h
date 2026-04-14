@@ -17,8 +17,8 @@ struct LogEntry {
 struct DataLogEntry {
   unsigned long timestamp;
   String dataType;   // "RTCM1005", "RTCM1074", "RTK_STATUS", etc.
-  float latitude;
-  float longitude;
+  double latitude;
+  double longitude;
   float altitude;
   uint8_t fixType;
   uint8_t satellites;
@@ -50,7 +50,7 @@ public:
   void logWarn(const String& component, const String& message);
   
   // Data logging
-  void logData(const String& dataType, float latitude, float longitude, float altitude, 
+  void logData(const String& dataType, double latitude, double longitude, float altitude,
                uint8_t fixType, uint8_t satellites);
   void logRTCMMessage(uint16_t messageType, uint32_t count);
   

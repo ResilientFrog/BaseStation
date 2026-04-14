@@ -31,6 +31,19 @@ String escapeJson(const String& input) {
 
   return escaped;
 }
+
+int findNthComma(const String& input, int n) {
+  int found = 0;
+  for (int i = 0; i < input.length(); ++i) {
+    if (input[i] == ',') {
+      found++;
+      if (found == n) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
 }
 
 const char* Logger::STEP_LOG_FILE = "/logs/steps.txt";
@@ -39,8 +52,7 @@ const char* Logger::DATA_LOG_FILE = "/logs/data.txt";
 Logger logger;
 
 Logger::Logger() {
-  // Don't initialize filesystem here - it's not mounted yet
-  // Will be initialized in setup() via logger.initialize()
+
 }
 
 void Logger::initialize() {
@@ -97,7 +109,7 @@ void Logger::logWarn(const String& component, const String& message) {
   logStep(component, message, "WARN");
 }
 
-void Logger::logData(const String& dataType, float latitude, float longitude, float altitude,
+void Logger::logData(const String& dataType, double latitude, double longitude, float altitude,
                      uint8_t fixType, uint8_t satellites) {
   DataLogEntry entry;
   entry.timestamp = millis();
@@ -110,16 +122,11 @@ void Logger::logData(const String& dataType, float latitude, float longitude, fl
   
   dataLogs.push_back(entry);
   
-  // Keep only recent entries in memory
-  if (dataLogs.size() > MAX_ENTRIES_IN_MEMORY) {
-    dataLogs.erase(dataLogs.begin());
-  }
-  
   // Write to file only if initialized
   if (initialized) {
     File file = LittleFS.open(DATA_LOG_FILE, FILE_APPEND);
     if (file) {
-      file.printf("%lu,%s,%.7f,%.7f,%.2f,%d,%d\n", entry.timestamp, entry.dataType.c_str(),
+      file.printf("%lu,%s,%.8f,%.8f,%.2f,%d,%d\n", entry.timestamp, entry.dataType.c_str(),
                   entry.latitude, entry.longitude, entry.altitude, entry.fixType, entry.satellites);
       file.close();
     }
@@ -153,8 +160,8 @@ String Logger::getDataLogsAsJSON() {
     json += "{";
     json += "\"timestamp\":" + String(dataLogs[i].timestamp) + ",";
     json += "\"dataType\":\"" + escapeJson(dataLogs[i].dataType) + "\",";
-    json += "\"latitude\":" + String(dataLogs[i].latitude, 7) + ",";
-    json += "\"longitude\":" + String(dataLogs[i].longitude, 7) + ",";
+    json += "\"latitude\":" + String(dataLogs[i].latitude, 8) + ",";
+    json += "\"longitude\":" + String(dataLogs[i].longitude, 8) + ",";
     json += "\"altitude\":" + String(dataLogs[i].altitude, 2) + ",";
     json += "\"fixType\":" + String(dataLogs[i].fixType) + ",";
     json += "\"satellites\":" + String(dataLogs[i].satellites);
@@ -195,8 +202,75 @@ void Logger::clearLogs() {
 }
 
 void Logger::loadLogsFromFile() {
-  // Load recent entries from file (limit to prevent memory issues)
-  // Implementation can be expanded if needed
+  stepLogs.clear();
+  dataLogs.clear();
+
+  if (LittleFS.exists(STEP_LOG_FILE)) {
+    File stepFile = LittleFS.open(STEP_LOG_FILE, FILE_READ);
+    if (stepFile) {
+      while (stepFile.available()) {
+        String line = stepFile.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) {
+          continue;
+        }
+
+        int comma1 = findNthComma(line, 1);
+        int comma2 = findNthComma(line, 2);
+        int comma3 = findNthComma(line, 3);
+        if (comma1 <= 0 || comma2 <= comma1 || comma3 <= comma2) {
+          continue;
+        }
+
+        LogEntry entry;
+        entry.timestamp = (unsigned long)line.substring(0, comma1).toInt();
+        entry.level = line.substring(comma1 + 1, comma2);
+        entry.component = line.substring(comma2 + 1, comma3);
+        entry.message = line.substring(comma3 + 1);
+        stepLogs.push_back(entry);
+
+        if (stepLogs.size() > MAX_ENTRIES_IN_MEMORY) {
+          stepLogs.erase(stepLogs.begin());
+        }
+      }
+      stepFile.close();
+    }
+  }
+
+  if (LittleFS.exists(DATA_LOG_FILE)) {
+    File dataFile = LittleFS.open(DATA_LOG_FILE, FILE_READ);
+    if (dataFile) {
+      while (dataFile.available()) {
+        String line = dataFile.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) {
+          continue;
+        }
+
+        int comma1 = findNthComma(line, 1);
+        int comma2 = findNthComma(line, 2);
+        int comma3 = findNthComma(line, 3);
+        int comma4 = findNthComma(line, 4);
+        int comma5 = findNthComma(line, 5);
+        int comma6 = findNthComma(line, 6);
+        if (comma1 <= 0 || comma2 <= comma1 || comma3 <= comma2 ||
+            comma4 <= comma3 || comma5 <= comma4 || comma6 <= comma5) {
+          continue;
+        }
+
+        DataLogEntry entry;
+        entry.timestamp = (unsigned long)line.substring(0, comma1).toInt();
+        entry.dataType = line.substring(comma1 + 1, comma2);
+        entry.latitude = line.substring(comma2 + 1, comma3).toDouble();
+        entry.longitude = line.substring(comma3 + 1, comma4).toDouble();
+        entry.altitude = line.substring(comma4 + 1, comma5).toFloat();
+        entry.fixType = (uint8_t)line.substring(comma5 + 1, comma6).toInt();
+        entry.satellites = (uint8_t)line.substring(comma6 + 1).toInt();
+        dataLogs.push_back(entry);
+      }
+      dataFile.close();
+    }
+  }
 }
 
 String Logger::getStatistics() {
