@@ -31,7 +31,8 @@ void initWiFiServer();
 void handleRoot();
 void handleClient();
 void handleRTKClients();
-void sendRTCMToClients(uint8_t *data, uint16_t length);
+void sendRTCMToClients(const uint8_t *data, uint16_t length);
 BaseConfig getBaseConfiguration();
+void resetMeasurementSession();
 
 #endif

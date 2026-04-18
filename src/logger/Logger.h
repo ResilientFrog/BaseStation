@@ -22,6 +22,7 @@ struct DataLogEntry {
   float altitude;
   uint8_t fixType;
   uint8_t satellites;
+  float accuracyMeters;
 };
 
 class Logger {
@@ -45,14 +46,12 @@ public:
   // Step logging
   void logStep(const String& component, const String& message, const String& level = "INFO");
   void logInfo(const String& component, const String& message);
-  void logDebug(const String& component, const String& message);
   void logError(const String& component, const String& message);
   void logWarn(const String& component, const String& message);
   
   // Data logging
-  void logData(const String& dataType, double latitude, double longitude, float altitude,
-               uint8_t fixType, uint8_t satellites);
-  void logRTCMMessage(uint16_t messageType, uint32_t count);
+  void logDataAccuracy(const String& dataType, double latitude, double longitude, float altitude,
+                       uint8_t fixType, uint8_t satellites, float accuracyMeters);
   
   // Retrieval
   String getStepLogsAsJSON();
@@ -60,7 +59,6 @@ public:
   String getFullLogsAsJSON();
   
   // File operations
-  void saveLogs();
   void clearLogs();
   void loadLogsFromFile();
   

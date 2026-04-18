@@ -1,37 +1,8 @@
 #include "Logger.h"
+#include <math.h>
+#include <ArduinoJson.h>
 
 namespace {
-String escapeJson(const String& input) {
-  String escaped;
-  escaped.reserve(input.length() + 8);
-
-  for (size_t index = 0; index < input.length(); ++index) {
-    char character = input[index];
-    switch (character) {
-      case '\\':
-        escaped += "\\\\";
-        break;
-      case '"':
-        escaped += "\\\"";
-        break;
-      case '\n':
-        escaped += "\\n";
-        break;
-      case '\r':
-        escaped += "\\r";
-        break;
-      case '\t':
-        escaped += "\\t";
-        break;
-      default:
-        escaped += character;
-        break;
-    }
-  }
-
-  return escaped;
-}
-
 int findNthComma(const String& input, int n) {
   int found = 0;
   for (int i = 0; i < input.length(); ++i) {
@@ -43,6 +14,20 @@ int findNthComma(const String& input, int n) {
     }
   }
   return -1;
+}
+
+String toCsvNumber(double value, int decimals) {
+  if (isnan(value) || isinf(value)) {
+    return "";
+  }
+  return String(value, decimals);
+}
+
+double parseCsvNumber(const String& token) {
+  if (token.length() == 0) {
+    return NAN;
+  }
+  return token.toDouble();
 }
 }
 
@@ -68,14 +53,12 @@ void Logger::initialize() {
 
 void Logger::logStep(const String& component, const String& message, const String& level) {
   LogEntry entry;
-  entry.timestamp = millis();
+  entry.timestamp = millis() / 1000UL;
   entry.component = component;
   entry.message = message;
   entry.level = level;
   
   stepLogs.push_back(entry);
-  
-  // Keep only recent entries in memory
   if (stepLogs.size() > MAX_ENTRIES_IN_MEMORY) {
     stepLogs.erase(stepLogs.begin());
   }
@@ -97,10 +80,6 @@ void Logger::logInfo(const String& component, const String& message) {
   logStep(component, message, "INFO");
 }
 
-void Logger::logDebug(const String& component, const String& message) {
-  logStep(component, message, "DEBUG");
-}
-
 void Logger::logError(const String& component, const String& message) {
   logStep(component, message, "ERROR");
 }
@@ -109,79 +88,81 @@ void Logger::logWarn(const String& component, const String& message) {
   logStep(component, message, "WARN");
 }
 
-void Logger::logData(const String& dataType, double latitude, double longitude, float altitude,
-                     uint8_t fixType, uint8_t satellites) {
+void Logger::logDataAccuracy(const String& dataType, double latitude, double longitude, float altitude,
+                             uint8_t fixType, uint8_t satellites, float accuracyMeters) {
   DataLogEntry entry;
-  entry.timestamp = millis();
+  entry.timestamp = millis() / 1000UL;
   entry.dataType = dataType;
   entry.latitude = latitude;
   entry.longitude = longitude;
   entry.altitude = altitude;
   entry.fixType = fixType;
   entry.satellites = satellites;
+  entry.accuracyMeters = accuracyMeters;
   
   dataLogs.push_back(entry);
+  if (dataLogs.size() > MAX_ENTRIES_IN_MEMORY) {
+    dataLogs.erase(dataLogs.begin());
+  }
   
   // Write to file only if initialized
   if (initialized) {
     File file = LittleFS.open(DATA_LOG_FILE, FILE_APPEND);
     if (file) {
-      file.printf("%lu,%s,%.8f,%.8f,%.2f,%d,%d\n", entry.timestamp, entry.dataType.c_str(),
-                  entry.latitude, entry.longitude, entry.altitude, entry.fixType, entry.satellites);
+      String line = String(entry.timestamp) + "," + entry.dataType + "," +
+                    toCsvNumber(entry.latitude, 8) + "," +
+                    toCsvNumber(entry.longitude, 8) + "," +
+                    toCsvNumber(entry.altitude, 2) + "," +
+                    String(entry.fixType) + "," +
+                    String(entry.satellites) + "," +
+                    toCsvNumber(entry.accuracyMeters, 3);
+      file.println(line);
       file.close();
     }
   }
 }
 
-void Logger::logRTCMMessage(uint16_t messageType, uint32_t count) {
-  String msg = "RTCM Type " + String(messageType) + " count: " + String(count);
-  logInfo("RTK", msg);
-}
-
 String Logger::getStepLogsAsJSON() {
-  String json = "[";
-  for (size_t i = 0; i < stepLogs.size(); i++) {
-    if (i > 0) json += ",";
-    json += "{";
-    json += "\"timestamp\":" + String(stepLogs[i].timestamp) + ",";
-    json += "\"level\":\"" + escapeJson(stepLogs[i].level) + "\",";
-    json += "\"component\":\"" + escapeJson(stepLogs[i].component) + "\",";
-    json += "\"message\":\"" + escapeJson(stepLogs[i].message) + "\"";
-    json += "}";
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (const auto& entry : stepLogs) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["timestamp"] = entry.timestamp;
+    obj["level"] = entry.level;
+    obj["component"] = entry.component;
+    obj["message"] = entry.message;
   }
-  json += "]";
-  return json;
+  String output;
+  serializeJson(doc, output);
+  return output;
 }
 
 String Logger::getDataLogsAsJSON() {
-  String json = "[";
-  for (size_t i = 0; i < dataLogs.size(); i++) {
-    if (i > 0) json += ",";
-    json += "{";
-    json += "\"timestamp\":" + String(dataLogs[i].timestamp) + ",";
-    json += "\"dataType\":\"" + escapeJson(dataLogs[i].dataType) + "\",";
-    json += "\"latitude\":" + String(dataLogs[i].latitude, 8) + ",";
-    json += "\"longitude\":" + String(dataLogs[i].longitude, 8) + ",";
-    json += "\"altitude\":" + String(dataLogs[i].altitude, 2) + ",";
-    json += "\"fixType\":" + String(dataLogs[i].fixType) + ",";
-    json += "\"satellites\":" + String(dataLogs[i].satellites);
-    json += "}";
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (const auto& entry : dataLogs) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["timestamp"] = entry.timestamp;
+    obj["dataType"] = entry.dataType;
+    obj["latitude"] = entry.latitude;
+    obj["longitude"] = entry.longitude;
+    obj["altitude"] = (double)entry.altitude;
+    obj["fixType"] = entry.fixType;
+    obj["satellites"] = entry.satellites;
+    obj["accuracyMeters"] = (double)entry.accuracyMeters;
   }
-  json += "]";
-  return json;
+  String output;
+  serializeJson(doc, output);
+  return output;
 }
 
 String Logger::getFullLogsAsJSON() {
-  String json = "{";
-  json += "\"steps\":" + getStepLogsAsJSON() + ",";
-  json += "\"data\":" + getDataLogsAsJSON();
-  json += "}";
-  return json;
-}
-
-void Logger::saveLogs() {
-  // Logs are saved to file on each call, this is for flushing if needed
-  // In LittleFS, file operations are immediate
+  JsonDocument doc;
+  doc["steps"] = serialized(getStepLogsAsJSON());
+  doc["data"] = serialized(getDataLogsAsJSON());
+  String output;
+  serializeJson(doc, output);
+  return output;
 }
 
 void Logger::clearLogs() {
@@ -228,7 +209,6 @@ void Logger::loadLogsFromFile() {
         entry.component = line.substring(comma2 + 1, comma3);
         entry.message = line.substring(comma3 + 1);
         stepLogs.push_back(entry);
-
         if (stepLogs.size() > MAX_ENTRIES_IN_MEMORY) {
           stepLogs.erase(stepLogs.begin());
         }
@@ -253,6 +233,7 @@ void Logger::loadLogsFromFile() {
         int comma4 = findNthComma(line, 4);
         int comma5 = findNthComma(line, 5);
         int comma6 = findNthComma(line, 6);
+        int comma7 = findNthComma(line, 7);
         if (comma1 <= 0 || comma2 <= comma1 || comma3 <= comma2 ||
             comma4 <= comma3 || comma5 <= comma4 || comma6 <= comma5) {
           continue;
@@ -261,12 +242,21 @@ void Logger::loadLogsFromFile() {
         DataLogEntry entry;
         entry.timestamp = (unsigned long)line.substring(0, comma1).toInt();
         entry.dataType = line.substring(comma1 + 1, comma2);
-        entry.latitude = line.substring(comma2 + 1, comma3).toDouble();
-        entry.longitude = line.substring(comma3 + 1, comma4).toDouble();
-        entry.altitude = line.substring(comma4 + 1, comma5).toFloat();
+        entry.latitude = parseCsvNumber(line.substring(comma2 + 1, comma3));
+        entry.longitude = parseCsvNumber(line.substring(comma3 + 1, comma4));
+        entry.altitude = (float)parseCsvNumber(line.substring(comma4 + 1, comma5));
         entry.fixType = (uint8_t)line.substring(comma5 + 1, comma6).toInt();
-        entry.satellites = (uint8_t)line.substring(comma6 + 1).toInt();
+        if (comma7 > comma6) {
+          entry.satellites = (uint8_t)line.substring(comma6 + 1, comma7).toInt();
+          entry.accuracyMeters = (float)parseCsvNumber(line.substring(comma7 + 1));
+        } else {
+          entry.satellites = (uint8_t)line.substring(comma6 + 1).toInt();
+          entry.accuracyMeters = NAN;
+        }
         dataLogs.push_back(entry);
+        if (dataLogs.size() > MAX_ENTRIES_IN_MEMORY) {
+          dataLogs.erase(dataLogs.begin());
+        }
       }
       dataFile.close();
     }
@@ -274,9 +264,10 @@ void Logger::loadLogsFromFile() {
 }
 
 String Logger::getStatistics() {
-  String stats = "{";
-  stats += "\"stepLogsCount\":" + String(stepLogs.size()) + ",";
-  stats += "\"dataLogsCount\":" + String(dataLogs.size());
-  stats += "}";
-  return stats;
+  JsonDocument doc;
+  doc["stepLogsCount"] = stepLogs.size();
+  doc["dataLogsCount"] = dataLogs.size();
+  String output;
+  serializeJson(doc, output);
+  return output;
 }

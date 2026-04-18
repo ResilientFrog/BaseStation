@@ -7,7 +7,6 @@
 #include <Adafruit_SSD1306.h>
 #include <LittleFS.h>
 
-#define LOG_FILE "/sensor_log.txt"
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_MOSI 23
@@ -58,6 +57,11 @@ RTCMStats rtcmStats;
 GNSSDisplayCache gnssDisplayCache;
 ScreenMode currentScreen = SCREEN_MAIN;
 unsigned long lastScreenSwitch = 0;
+unsigned long lastDisplayUpdate = 0;
+unsigned long lastStatusLog = 0;
+unsigned long lastScreenLogTime = 0;
+unsigned long lastGnssPoll = 0;
+unsigned long lastDisplayCacheRefresh = 0;
 const uint16_t SCREEN_SWITCH_INTERVAL = 2000;
 const uint16_t DISPLAY_UPDATE_INTERVAL = 1000;
 const uint32_t SURVEY_STATUS_LOG_INTERVAL = 30000;
@@ -65,16 +69,6 @@ const uint16_t GNSS_POLL_INTERVAL = 100;
 const uint16_t DISPLAY_CACHE_REFRESH_INTERVAL = 500;
 const uint32_t SPI_FREQUENCY = 1000000;
 const uint16_t DELAY_TIME = 2000;
-const uint32_t BAUD_RATE = 115200;
-
-void logToFile(String message) {
-  File file = LittleFS.open(LOG_FILE, FILE_APPEND);
-  if (!file) {
-    return;
-  }
-  file.println(String(millis()) + " - " + message);
-  file.close();
-}
 
 // Function for Display RTCM 1005 message
 void displayRTCM1005() {
@@ -130,16 +124,31 @@ void displayMainScreen() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
-  float accMeters = gnssDisplayCache.accuracyMeters;
-  display.setCursor(0, 0);
-  display.printf("Acc: %.2f m", accMeters);
-  display.setCursor(0, 15);
-  display.printf("Fix: %d  Sats: %d", gnssDisplayCache.fix, gnssDisplayCache.sats);
-  display.setCursor(0, 30);
   bool surveyValid = gnssDisplayCache.surveyValid;
   bool surveyActive = gnssDisplayCache.surveyActive;
   bool surveyRequested = (getCurrentBaseMode() == MODE_SURVEY_IN);
+  bool fixedModeActive = hasAppliedBaseConfiguration() && (getCurrentBaseMode() == MODE_FIXED);
   
+  display.setCursor(0, 0);
+  display.printf("Fix: %d  Sats: %d", gnssDisplayCache.fix, gnssDisplayCache.sats);
+  
+  if (fixedModeActive) {
+    display.setCursor(0, 15);
+    display.print("Mode: FIXED ACTIVE");
+    display.setCursor(0, 30);
+    display.printf("Lon: %.6f", longitudeData() / 1e7);
+    display.setCursor(0, 41);
+    display.printf("Lat: %.6f", latitudeData() / 1e7);
+    display.setCursor(0, 52);
+    display.printf("Alt: %.2f", altitudeData() / 1000.0);
+    display.display();
+    return;
+  }
+
+  float accMeters = gnssDisplayCache.accuracyMeters;
+  display.setCursor(0, 15);
+  display.printf("Acc: %.2f m", accMeters);
+  display.setCursor(0, 30);
 
   if (surveyValid) {
     display.print("Survey: DONE");
@@ -170,12 +179,31 @@ void refreshGNSSDisplayCache() {
   gnssDisplayCache.initialized = true;
 }
 
+void resetMeasurementSession() {
+  rtcmStats = RTCMStats();
+  gnssDisplayCache = GNSSDisplayCache();
+  currentScreen = SCREEN_MAIN;
+  lastScreenSwitch = millis();
+  lastDisplayUpdate = 0;
+  lastStatusLog = 0;
+  lastScreenLogTime = 0;
+  lastGnssPoll = 0;
+  lastDisplayCacheRefresh = 0;
 
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("NEW SESSION");
+  display.setCursor(0, 16);
+  display.println("Waiting for GNSS");
+  display.display();
+}
+
+#ifndef UNIT_TEST
 void setup() {
 
   delay(DELAY_TIME);
-
-  Serial.begin(BAUD_RATE);
   delay(50);
   
   SPI.begin(OLED_CLK, -1, OLED_MOSI, OLED_CS);
@@ -195,30 +223,17 @@ void setup() {
 
   delay(1500);
  
-  if (!LittleFS.begin(true)) {
-    logger.logError("System", "LittleFS mount failed");
+  if (LittleFS.begin(true)) {
+    logger.initialize();
   }
 
   initWiFiServer();
   initRTKController();
   lastScreenSwitch = millis();
-  BaseConfig values = getBaseConfiguration();
-
-  if (values.mode != MODE_INVALID) {
-    bool applied = setMode(values);
-    String initMsg = applied ? "Initial settings applied successfully" : "Failed to apply initial settings";
-    logger.logInfo("System", initMsg);
-   
-  } 
 }
 
 // Function for main logic - display status on OLED, handle web server and RTK clients, check for RTCM messages, etc.
 void loop() {
-  static unsigned long lastDisplayUpdate = 0;
-  static unsigned long lastStatusLog = 0;
-  static unsigned long lastScreenLogTime = 0;
-  static unsigned long lastGnssPoll = 0;
-  static unsigned long lastDisplayCacheRefresh = 0;
   unsigned long now = millis();
 
   if (now - lastGnssPoll >= GNSS_POLL_INTERVAL) {
@@ -243,14 +258,9 @@ void loop() {
   if (screenChanged) {
     unsigned long delta = (lastScreenLogTime == 0) ? 0 : (now - lastScreenLogTime);
     lastScreenLogTime = now;
-    Serial.printf("[SCREEN] t=%lu ms, screen=%s, delta=%lu ms\n",
-                  now,
-                  (currentScreen == SCREEN_MAIN) ? "MAIN" : "RTCM",
-                  delta);
   }
 
   if (hasAppliedBaseConfiguration() &&
-      getCurrentBaseMode() == MODE_SURVEY_IN &&
       now - lastStatusLog >= SURVEY_STATUS_LOG_INTERVAL) {
     lastStatusLog = now;
     checkRTKStatus();
@@ -266,3 +276,4 @@ void loop() {
     }
   }
 }
+#endif
