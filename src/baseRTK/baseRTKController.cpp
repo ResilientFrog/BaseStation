@@ -95,15 +95,8 @@ void checkRTKStatus() {
   double altitude = altitudeRaw / 1000.0;
 
   if (currentBaseMode == MODE_SURVEY_IN) {
-    // Survey-In: keep time-series of accuracy only.
-    logger.logDataAccuracy("SURVEY_ACCURACY", NAN, NAN, NAN, fixType, SIV, observationAccuracy());
-
-    // Survey-In coordinates are recorded only once after we have a usable fix.
-    if (!surveyCoordinatesLogged && fixType >= 2) {
-      logger.logDataAccuracy("SURVEY_COORDINATES", latitude, longitude, altitude, fixType, SIV, observationAccuracy());
-      surveyCoordinatesLogged = true;
-      logger.logInfo("RTK", "Survey coordinates logged once");
-    }
+    // Survey-In: log coordinates, accuracy and observation time every cycle.
+    logger.logDataAccuracy("SURVEY_STATUS", latitude, longitude, altitude, fixType, SIV, observationAccuracy(), observationTime());
   } else if (currentBaseMode == MODE_FIXED) {
     // Fixed mode coordinates are recorded only once.
     if (!fixedCoordinatesLogged) {

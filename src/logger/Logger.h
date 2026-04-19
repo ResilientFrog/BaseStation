@@ -23,6 +23,7 @@ struct DataLogEntry {
   uint8_t fixType;
   uint8_t satellites;
   float accuracyMeters;
+  unsigned long observationTimeSec;
 };
 
 class Logger {
@@ -51,7 +52,8 @@ public:
   
   // Data logging
   void logDataAccuracy(const String& dataType, double latitude, double longitude, float altitude,
-                       uint8_t fixType, uint8_t satellites, float accuracyMeters);
+                       uint8_t fixType, uint8_t satellites, float accuracyMeters,
+                       unsigned long observationTimeSec = 0);
   
   // Retrieval
   String getStepLogsAsJSON();

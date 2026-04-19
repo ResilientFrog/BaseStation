@@ -89,7 +89,8 @@ void Logger::logWarn(const String& component, const String& message) {
 }
 
 void Logger::logDataAccuracy(const String& dataType, double latitude, double longitude, float altitude,
-                             uint8_t fixType, uint8_t satellites, float accuracyMeters) {
+                             uint8_t fixType, uint8_t satellites, float accuracyMeters,
+                             unsigned long observationTimeSec) {
   DataLogEntry entry;
   entry.timestamp = millis() / 1000UL;
   entry.dataType = dataType;
@@ -99,6 +100,7 @@ void Logger::logDataAccuracy(const String& dataType, double latitude, double lon
   entry.fixType = fixType;
   entry.satellites = satellites;
   entry.accuracyMeters = accuracyMeters;
+  entry.observationTimeSec = observationTimeSec;
   
   dataLogs.push_back(entry);
   if (dataLogs.size() > MAX_ENTRIES_IN_MEMORY) {
@@ -115,7 +117,8 @@ void Logger::logDataAccuracy(const String& dataType, double latitude, double lon
                     toCsvNumber(entry.altitude, 2) + "," +
                     String(entry.fixType) + "," +
                     String(entry.satellites) + "," +
-                    toCsvNumber(entry.accuracyMeters, 3);
+                    toCsvNumber(entry.accuracyMeters, 3) + "," +
+                    String(entry.observationTimeSec);
       file.println(line);
       file.close();
     }
@@ -150,6 +153,7 @@ String Logger::getDataLogsAsJSON() {
     obj["fixType"] = entry.fixType;
     obj["satellites"] = entry.satellites;
     obj["accuracyMeters"] = (double)entry.accuracyMeters;
+    obj["observationTimeSec"] = entry.observationTimeSec;
   }
   String output;
   serializeJson(doc, output);
@@ -246,12 +250,15 @@ void Logger::loadLogsFromFile() {
         entry.longitude = parseCsvNumber(line.substring(comma3 + 1, comma4));
         entry.altitude = (float)parseCsvNumber(line.substring(comma4 + 1, comma5));
         entry.fixType = (uint8_t)line.substring(comma5 + 1, comma6).toInt();
+        int comma8 = findNthComma(line, 8);
         if (comma7 > comma6) {
           entry.satellites = (uint8_t)line.substring(comma6 + 1, comma7).toInt();
-          entry.accuracyMeters = (float)parseCsvNumber(line.substring(comma7 + 1));
+          entry.accuracyMeters = (float)parseCsvNumber(line.substring(comma7 + 1, comma8 > comma7 ? comma8 : line.length()));
+          entry.observationTimeSec = (comma8 > comma7) ? (unsigned long)line.substring(comma8 + 1).toInt() : 0;
         } else {
           entry.satellites = (uint8_t)line.substring(comma6 + 1).toInt();
           entry.accuracyMeters = NAN;
+          entry.observationTimeSec = 0;
         }
         dataLogs.push_back(entry);
         if (dataLogs.size() > MAX_ENTRIES_IN_MEMORY) {
