@@ -59,7 +59,7 @@ public:
   String getStepLogsAsJSON();
   String getDataLogsAsJSON();
   String getFullLogsAsJSON();
-  
+ 
   // File operations
   void clearLogs();
   void loadLogsFromFile();
